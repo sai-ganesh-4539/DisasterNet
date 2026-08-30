@@ -1,18 +1,20 @@
-"""
-Habitation analysis endpoints
-"""
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List, Dict, Any, Optional
+"""Dynamic habitation analysis endpoints."""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from app.ml.priority_classifier import priority_classifier
+
+from app.core.security import get_current_user_optional
 from app.ml.model_registry import get_model
-from app.core.security import get_current_user
+from app.services.live_gis import INDIA_BBOX, build_snapshot
 
 router = APIRouter()
 
 
 class HabitationRiskRequest(BaseModel):
-    """Request model for habitation risk assessment"""
     habitation_id: str
     latitude: float
     longitude: float
@@ -36,212 +38,195 @@ class HabitationRiskRequest(BaseModel):
 
 @router.get("/")
 async def get_habitations(
+    south: float = Query(INDIA_BBOX[0]),
+    west: float = Query(INDIA_BBOX[1]),
+    north: float = Query(INDIA_BBOX[2]),
+    east: float = Query(INDIA_BBOX[3]),
     state_code: Optional[str] = None,
     district_code: Optional[str] = None,
     priority_category: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
 ):
-    """
-    Get habitations with optional filters
-    
-    - **state_code**: Filter by state code
-    - **district_code**: Filter by district code
-    - **priority_category**: Filter by priority category
-    - **limit**: Maximum number of results
-    - **offset**: Offset for pagination
-    """
     try:
-        # This would query the database in production
-        # For now, return sample data
-        
-        sample_habitations = [
-            {
-                'habitation_id': 'HAB_001',
-                'village_name': 'Village 1',
-                'state_code': 'MH',
-                'district_name': 'PUNE',
-                'total_population': 500,
-                'latitude': 18.5,
-                'longitude': 73.9,
-                'priority_score': 85.5,
-                'priority_category': 'IMMEDIATE',
-                'red_zone_proximity_km': 0.5
-            },
-            {
-                'habitation_id': 'HAB_002',
-                'village_name': 'Village 2',
-                'state_code': 'MH',
-                'district_name': 'NASHIK',
-                'total_population': 750,
-                'latitude': 19.9,
-                'longitude': 73.8,
-                'priority_score': 65.0,
-                'priority_category': 'SHORT_TERM',
-                'red_zone_proximity_km': 3.5
-            }
-        ]
-        
-        # Apply filters
-        filtered_habitations = sample_habitations
+        snapshot = build_snapshot(south=south, west=west, north=north, east=east)
+        habitations = list(snapshot.get("habitations", []))
         if state_code:
-            filtered_habitations = [h for h in filtered_habitations if h.get('state_code') == state_code]
+            habitations = [
+                h
+                for h in habitations
+                if str(h.get("state_code", "")).upper() == state_code.upper()
+            ]
         if district_code:
-            filtered_habitations = [h for h in filtered_habitations if h.get('district_name') == district_code]
+            district_upper = district_code.upper()
+            habitations = [
+                h
+                for h in habitations
+                if district_upper in str(h.get("district_name", "")).upper()
+            ]
         if priority_category:
-            filtered_habitations = [h for h in filtered_habitations if h.get('priority_category') == priority_category.upper()]
-        
-        # Apply pagination
-        paginated_habitations = filtered_habitations[offset:offset + limit]
-        
+            habitations = [
+                h
+                for h in habitations
+                if str(h.get("priority_category", "")).upper()
+                == priority_category.upper()
+            ]
+        total = len(habitations)
+        habitations = habitations[offset : offset + limit]
         return {
-            'count': len(filtered_habitations),
-            'limit': limit,
-            'offset': offset,
-            'habitations': paginated_habitations
+            "count": total,
+            "limit": limit,
+            "offset": offset,
+            "generated_at": snapshot.get("generated_at"),
+            "cache_hit": snapshot.get("cache_hit", False),
+            "habitations": habitations,
         }
-        
-    except Exception as e:
+    except Exception as exc:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get habitations: {str(e)}"
-        )
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to build live habitation list: {exc}",
+        ) from exc
 
 
 @router.get("/{habitation_id}/risk")
 async def get_habitation_risk(
     habitation_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    south: float = Query(INDIA_BBOX[0]),
+    west: float = Query(INDIA_BBOX[1]),
+    north: float = Query(INDIA_BBOX[2]),
+    east: float = Query(INDIA_BBOX[3]),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
 ):
-    """Get risk assessment for a specific habitation"""
-    try:
-        # This would query the database and calculate risk in production
-        # For now, return sample data
-        
-        sample_risk_assessment = {
-            'habitation_id': habitation_id,
-            'village_name': 'Village 1',
-            'total_population': 500,
-            'vulnerability_score': 72.5,
-            'hazard_exposure_score': 85.0,
-            'access_limitations_score': 68.0,
-            'overall_risk_score': 75.0,
-            'risk_level': 'HIGH',
-            'red_zone_proximity_km': 0.5,
-            'current_red_zone_id': 'RZ_001',
-            'evacuation_time_hours': 4.5,
-            'assessment_timestamp': '2024-01-15T14:00:00Z'
-        }
-        
-        return sample_risk_assessment
-        
-    except Exception as e:
+    snapshot = build_snapshot(south=south, west=west, north=north, east=east)
+    habitation = next(
+        (
+            h
+            for h in snapshot.get("habitations", [])
+            if h.get("habitation_id") == habitation_id
+        ),
+        None,
+    )
+    if habitation is None:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get habitation risk: {str(e)}"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Habitation not found: {habitation_id}",
         )
+
+    score = float(habitation.get("priority_score") or 0.0)
+    vulnerability_score = min(
+        100.0,
+        (
+            float(habitation.get("population_60_plus") or 0)
+            + float(habitation.get("population_0_6") or 0)
+        )
+        / max(1.0, float(habitation.get("total_population") or 1))
+        * 100.0
+        * 2.2,
+    )
+    access_limitations = (
+        90.0
+        if habitation.get("path_status") == "BLOCKED"
+        else 65.0
+        if habitation.get("path_status") == "DAMAGED"
+        else 25.0
+    )
+    return {
+        "habitation_id": habitation.get("habitation_id"),
+        "village_name": habitation.get("village_name"),
+        "total_population": habitation.get("total_population"),
+        "vulnerability_score": round(vulnerability_score, 2),
+        "hazard_exposure_score": round(min(100.0, score + 8.0), 2),
+        "access_limitations_score": round(access_limitations, 2),
+        "overall_risk_score": round(score, 2),
+        "risk_level": "CRITICAL"
+        if score >= 85
+        else "HIGH"
+        if score >= 70
+        else "MEDIUM"
+        if score >= 50
+        else "LOW",
+        "red_zone_proximity_km": habitation.get("proximity_to_hazard_km"),
+        "current_red_zone_id": habitation.get("current_red_zone_id"),
+        "evacuation_time_hours": habitation.get("calculation_breakdown", {}).get(
+            "evacuation_time_hours"
+        ),
+        "assessment_timestamp": habitation.get("assessment_timestamp"),
+    }
 
 
 @router.post("/assess")
 async def assess_habitation_priority(
     request: HabitationRiskRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
 ):
-    """
-    Assess relocation priority for a habitation
-    
-    - **habitation_id**: Unique identifier for the habitation
-    - **latitude**: Location latitude
-    - **longitude**: Location longitude
-    - **total_population**: Total population
-    - **elderly_percentage**: Percentage of elderly population
-    - **child_percentage**: Percentage of children
-    - **disability_percentage**: Percentage of disabled population
-    - **population_density_per_sqkm**: Population density
-    - **economic_status**: Economic status (BPL, APL, MIXED)
-    - **road_connectivity**: Road connectivity type
-    - **road_distance_km**: Distance to main road in km
-    - **nearest_emergency_km**: Distance to emergency services in km
-    - **communication_availability**: Communication availability
-    - **evacuation_route_status**: Evacuation route status
-    - **evacuation_time_hours**: Estimated evacuation time in hours
-    - **red_zone_proximity_km**: Distance to nearest red zone in km
-    - **current_risk_score**: Current risk score (optional)
-    - **hazard_history**: List of past hazard events
-    - **disaster_frequency_score**: Score based on disaster history
-    """
     try:
-        # Get priority classifier model
         model = get_model("priority_classifier")
         if not model or not model.is_loaded:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Priority classifier model not available"
+                detail="Priority classifier model not available",
             )
-        
-        # Prepare features
-        features = request.dict()
-        
-        # Make prediction
-        priority_assessment = model.predict(features)
-        
-        return priority_assessment
-        
+        return model.predict(request.dict())
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Priority assessment failed: {str(e)}"
-        )
+            detail=f"Priority assessment failed: {exc}",
+        ) from exc
 
 
 @router.post("/assess-batch")
 async def assess_habitations_batch(
     habitations: List[HabitationRiskRequest],
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
 ):
-    """
-    Assess relocation priorities for multiple habitations
-    
-    - **habitations**: List of habitation features
-    """
     try:
-        # Get priority classifier model
         model = get_model("priority_classifier")
         if not model or not model.is_loaded:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Priority classifier model not available"
+                detail="Priority classifier model not available",
             )
-        
-        # Prepare features
         features_list = [habitation.dict() for habitation in habitations]
-        
-        # Make batch predictions
         priority_assessments = model.predict_batch(features_list)
-        
-        # Categorize by priority
-        immediate = [p for p in priority_assessments if p.get('priority_category') == 'IMMEDIATE']
-        short_term = [p for p in priority_assessments if p.get('priority_category') == 'SHORT_TERM']
-        medium_term = [p for p in priority_assessments if p.get('priority_category') == 'MEDIUM_TERM']
-        
         return {
-            'total_habitations': len(habitations),
-            'assessments': priority_assessments,
-            'summary': {
-                'immediate_count': len(immediate),
-                'short_term_count': len(short_term),
-                'medium_term_count': len(medium_term)
+            "total_habitations": len(habitations),
+            "assessments": priority_assessments,
+            "summary": {
+                "immediate_count": len(
+                    [
+                        p
+                        for p in priority_assessments
+                        if p.get("priority_category") == "IMMEDIATE"
+                    ]
+                ),
+                "short_term_count": len(
+                    [
+                        p
+                        for p in priority_assessments
+                        if p.get("priority_category") == "SHORT_TERM"
+                    ]
+                ),
+                "medium_term_count": len(
+                    [
+                        p
+                        for p in priority_assessments
+                        if p.get("priority_category") == "MEDIUM_TERM"
+                    ]
+                ),
             },
-            'prioritized_list': sorted(priority_assessments, key=lambda x: x.get('priority_score', 0), reverse=True)
+            "prioritized_list": sorted(
+                priority_assessments,
+                key=lambda x: x.get("priority_score") or 0,
+                reverse=True,
+            ),
         }
-        
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Batch priority assessment failed: {str(e)}"
-        )
+            detail=f"Batch priority assessment failed: {exc}",
+        ) from exc

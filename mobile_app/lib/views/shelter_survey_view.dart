@@ -113,6 +113,9 @@ class _ShelterSurveyViewState extends State<ShelterSurveyView> {
         await _db.saveSyncQueueItem(syncItem);
 
         // Step 3: Auto-Push Broker (Check connectivity and push if online)
+        if (!_syncService.isInitialized) {
+          await _syncService.initialize('FIELD-NODE');
+        }
         final isConnected = await _syncService.checkConnectivity();
         if (isConnected) {
           await _syncService.processSyncQueue();
@@ -259,7 +262,7 @@ class _ShelterSurveyViewState extends State<ShelterSurveyView> {
                 ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButtonFormField<String>(
-                    value: _capacityStatusController.text,
+                    initialValue: _capacityStatusController.text,
                     decoration: const InputDecoration(
                       border: InputBorder.none,
                       contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -327,7 +330,7 @@ class _ShelterSurveyViewState extends State<ShelterSurveyView> {
                 ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButtonFormField<String>(
-                    value: _accessRoadStatusController.text,
+                    initialValue: _accessRoadStatusController.text,
                     decoration: const InputDecoration(
                       border: InputBorder.none,
                       contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),

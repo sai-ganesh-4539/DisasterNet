@@ -1,221 +1,225 @@
-"""
-Data ingestion status and management endpoints
-"""
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
-from typing import Dict, Any, Optional
+"""Data-source status endpoints for demo/live GIS modes."""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
+
+from app.core.config import yaml_config
+from app.core.security import check_permission, get_current_user_optional
 from app.ingestion.scheduler import DataIngestionScheduler
-from app.core.security import get_current_user, check_permission
+from app.services.field_updates import field_update_store
+from app.services.live_gis import build_snapshot
 
 router = APIRouter()
-
-# Global scheduler instance
 data_scheduler = DataIngestionScheduler()
 
 
 class DataIngestionTriggerRequest(BaseModel):
-    """Request model for triggering data ingestion"""
-    source: str  # isro_bhuvan, imd_rainfall, census
+    source: str
 
 
 @router.get("/status")
 async def get_data_status(
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
 ):
-    """Get current data ingestion status"""
     try:
-        # This would query the database for actual status in production
-        # For now, return sample data
-        
-        sample_status = {
-            'last_ingestion': {
-                'isro_bhuvan': '2024-01-14T02:00:00Z',
-                'imd_rainfall': '2024-01-15T01:00:00Z',
-                'census': '2024-01-01T00:00:00Z'
+        snapshot = build_snapshot()
+        generated_at = datetime.fromisoformat(
+            snapshot["generated_at"].replace("Z", "+00:00")
+        )
+        mode = snapshot.get("mode") or "LIVE"
+        next_refresh = (
+            None
+            if mode == "DEMO_SCENARIO"
+            else (generated_at + timedelta(minutes=3)).isoformat()
+        )
+        return {
+            "mode": mode,
+            "scenario": snapshot.get("scenario"),
+            "last_generation": snapshot.get("generated_at"),
+            "next_refresh_due": next_refresh,
+            "data_sources": snapshot.get("data_sources", {}),
+            "record_counts": {
+                "grid_cells": len(snapshot.get("grid_cells", [])),
+                "red_zones": len(snapshot.get("red_zones", [])),
+                "habitations": len(snapshot.get("habitations", [])),
+                "shelters": len(snapshot.get("shelters", [])),
             },
-            'next_scheduled': {
-                'isro_bhuvan': '2024-01-21T02:00:00Z',
-                'imd_rainfall': '2024-01-15T02:00:00Z',
-                'census': '2025-01-01T00:00:00Z'
-            },
-            'data_freshness': {
-                'terrain_data': 'STALE',  # 1 day old
-                'weather_data': 'FRESH',  # 1 hour old
-                'census_data': 'CURRENT'  # 1 year old
-            },
-            'record_counts': {
-                'hazard_grids': 50000,
-                'environmental_data': 150000,
-                'census_data': 45000,
-                'habitations': 12000,
-                'shelters': 3500
-            },
-            'system_status': 'OPERATIONAL'
+            "field_update_overlay": field_update_store.counts(),
+            "system_status": "OPERATIONAL",
+            "cache_hit": snapshot.get("cache_hit", False),
         }
-        
-        return sample_status
-        
-    except Exception as e:
+    except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get data status: {str(e)}"
-        )
+            detail=f"Failed to get data status: {exc}",
+        ) from exc
 
 
 @router.post("/trigger")
 async def trigger_data_ingestion(
     request: DataIngestionTriggerRequest,
     background_tasks: BackgroundTasks,
-    current_user: Dict[str, Any] = Depends(check_permission("WRITE_FIELD_DATA"))
+    current_user: Dict[str, Any] = Depends(check_permission("WRITE_FIELD_DATA")),
 ):
-    """
-    Trigger manual data ingestion for a specific source
-    
-    - **source**: Data source to ingest (isro_bhuvan, imd_rainfall, census)
-    """
     try:
-        # Validate source
-        valid_sources = ['isro_bhuvan', 'imd_rainfall', 'census']
+        valid_sources = ["isro_bhuvan", "imd_rainfall", "census"]
         if request.source not in valid_sources:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid source. Must be one of: {valid_sources}"
+                detail=f"Invalid source. Must be one of: {valid_sources}",
             )
-        
-        # Trigger ingestion in background
+
         def run_ingestion():
-            result = data_scheduler.run_manual_ingestion(request.source)
-            return result
-        
+            return data_scheduler.run_manual_ingestion(request.source)
+
         background_tasks.add_task(run_ingestion)
-        
         return {
-            'success': True,
-            'message': f'Data ingestion triggered for {request.source}',
-            'triggered_by': current_user.get('username'),
-            'source': request.source
+            "success": True,
+            "message": f"Data ingestion triggered for {request.source}",
+            "triggered_by": current_user.get("username"),
+            "source": request.source,
         }
-        
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to trigger data ingestion: {str(e)}"
-        )
+            detail=f"Failed to trigger data ingestion: {exc}",
+        ) from exc
 
 
 @router.get("/sources")
 async def get_data_sources(
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
 ):
-    """Get available data sources and their configuration"""
-    try:
-        from app.core.config import yaml_config
-        
-        ingestion_config = yaml_config.get('data_ingestion', {})
-        
-        sources_info = {
-            'isro_bhuvan': {
-                'enabled': ingestion_config.get('isro_bhuvan', {}).get('enabled', True),
-                'update_frequency': ingestion_config.get('isro_bhuvan', {}).get('update_frequency', 'weekly'),
-                'data_types': ingestion_config.get('isro_bhuvan', {}).get('data_types', []),
-                'description': 'ISRO Bhuvan terrain and environmental data'
-            },
-            'imd_rainfall': {
-                'enabled': ingestion_config.get('imd_rainfall', {}).get('enabled', True),
-                'update_frequency': ingestion_config.get('imd_rainfall', {}).get('update_frequency', 'hourly'),
-                'api_type': ingestion_config.get('imd_rainfall', {}).get('api_type', 'live'),
-                'description': 'IMD rainfall and weather data'
-            },
-            'census': {
-                'enabled': ingestion_config.get('census', {}).get('enabled', True),
-                'update_frequency': ingestion_config.get('census', {}).get('update_frequency', 'yearly'),
-                'api_type': ingestion_config.get('census', {}).get('api_type', 'batch'),
-                'description': 'Census demographic and socio-economic data'
-            }
-        }
-        
+    ingestion_config = yaml_config.get("data_ingestion", {})
+    snapshot = build_snapshot()
+    mode = snapshot.get("mode") or "LIVE"
+    if mode == "DEMO_SCENARIO":
         return {
-            'sources': sources_info,
-            'scheduler_status': 'ACTIVE' if data_scheduler.is_running else 'INACTIVE'
+            "mode": mode,
+            "scenario": snapshot.get("scenario"),
+            "sources": {
+                "scenario_dataset": {
+                    "provider": "Curated SIH prototype dataset",
+                    "update_frequency": "manual scenario switch",
+                    "description": "Static multi-hazard scenario package used for deterministic demo outputs",
+                },
+                "field_overlays": {
+                    "provider": "On-device / backend field updates",
+                    "update_frequency": "on sync upload",
+                    "description": "Survey corrections applied over the active scenario snapshot",
+                },
+                "configured_ingestors": ingestion_config,
+            },
+            "scheduler_status": "INACTIVE_IN_DEMO_MODE",
         }
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get data sources: {str(e)}"
-        )
+    return {
+        "mode": mode,
+        "sources": {
+            "meteorology": {
+                "provider": "Open-Meteo",
+                "update_frequency": "on demand with 3-minute cache",
+                "description": "Live precipitation, humidity, wind, temperature and soil moisture",
+            },
+            "flood": {
+                "provider": "Open-Meteo GloFAS",
+                "update_frequency": "on demand with 3-minute cache",
+                "description": "River discharge signal used for flood amplification",
+            },
+            "terrain": {
+                "provider": "Open-Meteo DEM",
+                "update_frequency": "on demand with 3-minute cache",
+                "description": "Elevation samples with neighbor-derived slope",
+            },
+            "settlements_and_sites": {
+                "provider": "OpenStreetMap Overpass",
+                "update_frequency": "on demand with 3-minute cache",
+                "description": "Live habitations and relocation-site candidates",
+            },
+            "configured_ingestors": ingestion_config,
+        },
+        "scheduler_status": "ACTIVE" if data_scheduler.is_running else "INACTIVE",
+    }
 
 
 @router.get("/quality")
 async def get_data_quality(
     source: Optional[str] = None,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
 ):
-    """
-    Get data quality metrics
-    
-    - **source**: Optional filter by data source
-    """
-    try:
-        # This would calculate actual quality metrics from the database in production
-        # For now, return sample data
-        
-        sample_quality = {
-            'overall_quality_score': 87.5,
-            'quality_level': 'GOOD',
-            'source_quality': {
-                'isro_bhuvan': {
-                    'completeness': 92.0,
-                    'consistency': 88.0,
-                    'freshness': 85.0,
-                    'overall_score': 88.3,
-                    'quality_level': 'GOOD'
-                },
-                'imd_rainfall': {
-                    'completeness': 95.0,
-                    'consistency': 90.0,
-                    'freshness': 95.0,
-                    'overall_score': 93.3,
-                    'quality_level': 'EXCELLENT'
-                },
-                'census': {
-                    'completeness': 85.0,
-                    'consistency': 82.0,
-                    'freshness': 75.0,
-                    'overall_score': 80.7,
-                    'quality_level': 'GOOD'
-                }
+    snapshot = build_snapshot()
+    cache_hit = snapshot.get("cache_hit", False)
+    mode = snapshot.get("mode") or "LIVE"
+    if mode == "DEMO_SCENARIO":
+        source_quality = {
+            "scenario_dataset": {
+                "provider": "Curated SIH prototype dataset",
+                "snapshot_state": "STATIC_SCENARIO",
+                "assessment": "Decision layers come from a fixed scenario package for deterministic demonstration outputs.",
             },
-            'quality_issues': [
-                {
-                    'source': 'census',
-                    'issue_type': 'STALE_DATA',
-                    'severity': 'MEDIUM',
-                    'description': 'Census data is 1 year old'
-                }
-            ]
+            "field_overlays": {
+                "provider": "Survey sync overlays",
+                "snapshot_state": "LIVE_OVERLAY"
+                if field_update_store.counts()
+                else "IDLE",
+                "assessment": "Field submissions can still modify the active scenario snapshot.",
+            },
         }
-        
-        if source:
-            if source in sample_quality['source_quality']:
-                return {
-                    'source': source,
-                    **sample_quality['source_quality'][source]
-                }
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Source not found: {source}"
-                )
-        
-        return sample_quality
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get data quality: {str(e)}"
+    else:
+        source_quality = {
+            "meteorology": {
+                "provider": "Open-Meteo",
+                "snapshot_state": "CACHED" if cache_hit else "LIVE_FETCH",
+                "assessment": "Live meteorology is fetched on demand and cached for 3 minutes.",
+            },
+            "terrain": {
+                "provider": "Open-Meteo DEM + neighbor-derived slope",
+                "snapshot_state": "CACHED" if cache_hit else "LIVE_FETCH",
+                "assessment": "Terrain elevation is fetched live; slope is derived from local neighborhood samples.",
+            },
+            "settlements_and_sites": {
+                "provider": "OpenStreetMap Overpass",
+                "snapshot_state": "CACHED" if cache_hit else "LIVE_FETCH",
+                "assessment": "Settlement and facility features are fetched live from Overpass and merged with field overlays.",
+            },
+        }
+    quality_issues = []
+    if mode != "DEMO_SCENARIO" and cache_hit:
+        quality_issues.append(
+            {
+                "source": "snapshot_cache",
+                "issue_type": "CACHED_RESPONSE",
+                "severity": "LOW",
+                "description": "Returned data came from the 3-minute live snapshot cache.",
+            }
         )
+    quality = {
+        "mode": mode,
+        "scenario": snapshot.get("scenario"),
+        "snapshot_state": "STATIC_SCENARIO"
+        if mode == "DEMO_SCENARIO"
+        else ("CACHED" if cache_hit else "LIVE_FETCH"),
+        "generated_at": snapshot.get("generated_at"),
+        "source_quality": source_quality,
+        "quality_issues": quality_issues,
+        "record_counts": {
+            "grid_cells": len(snapshot.get("grid_cells", [])),
+            "red_zones": len(snapshot.get("red_zones", [])),
+            "habitations": len(snapshot.get("habitations", [])),
+            "shelters": len(snapshot.get("shelters", [])),
+        },
+    }
+    if source:
+        if source not in source_quality:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Source not found: {source}",
+            )
+        return {"source": source, **source_quality[source]}
+    return quality

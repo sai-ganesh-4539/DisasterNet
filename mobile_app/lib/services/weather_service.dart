@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -14,6 +15,7 @@ class WeatherData {
   final int cloudCover;
   final double pressure;
   final double elevation;
+  final double terrainSlopePercentage;
   final bool isDay;
   final String conditionText;
   final IconData conditionIcon;
@@ -33,6 +35,7 @@ class WeatherData {
     required this.cloudCover,
     required this.pressure,
     required this.elevation,
+    required this.terrainSlopePercentage,
     required this.isDay,
     required this.conditionText,
     required this.conditionIcon,
@@ -41,7 +44,13 @@ class WeatherData {
     required this.isWithinIndia,
   });
 
-  factory WeatherData.fromJson(Map<String, dynamic> json, {String locName = '', String district = '', bool insideIndia = true}) {
+  factory WeatherData.fromJson(
+    Map<String, dynamic> json, {
+    String locName = '',
+    String district = '',
+    bool insideIndia = true,
+    double slopePct = 2.5,
+  }) {
     final current = json['current'] as Map<String, dynamic>;
     final code = (current['weather_code'] as num?)?.toInt() ?? 0;
     final (text, icon) = _getWmoCondition(code);
@@ -59,6 +68,7 @@ class WeatherData {
       cloudCover: (current['cloud_cover'] as num?)?.toInt() ?? 20,
       pressure: (current['surface_pressure'] as num?)?.toDouble() ?? 1013.0,
       elevation: elev,
+      terrainSlopePercentage: slopePct,
       isDay: (current['is_day'] as num?)?.toInt() == 1,
       conditionText: text,
       conditionIcon: icon,
@@ -114,6 +124,7 @@ class WeatherData {
       cloudCover: 40,
       pressure: 1010.0,
       elevation: 320.0,
+      terrainSlopePercentage: 3.2,
       isDay: true,
       conditionText: 'Partly Cloudy',
       conditionIcon: Icons.wb_cloudy_rounded,
@@ -127,12 +138,52 @@ class WeatherData {
 class WeatherService {
   /// Strict geographical bounding box for Indian territory
   static bool checkWithinIndia(double latitude, double longitude) {
-    // Primary bounding box for mainland and island territories of India
-    // Lat: ~6.0N (Great Nicobar) to 37.5N (Siachen/Kashmir)
-    // Lon: ~68.0E (Gujarat coast) to 97.5E (Arunachal Pradesh)
     if (latitude < 6.0 || latitude > 37.5) return false;
     if (longitude < 68.0 || longitude > 97.5) return false;
     return true;
+  }
+
+  /// Real 5-Point Topographic Gradient Slope Calculation from DEM APIs
+  static Future<double> calculateRealDemSlope(double lat, double lon) async {
+    const delta = 0.005; // approx 550 meters ground offset
+    try {
+      final lats = [lat, lat + delta, lat - delta, lat, lat].map((l) => l.toStringAsFixed(5)).join(',');
+      final lons = [lon, lon, lon, lon + delta, lon - delta].map((l) => l.toStringAsFixed(5)).join(',');
+
+      final demUrl = Uri.parse(
+        'https://api.open-meteo.com/v1/elevation?latitude=$lats&longitude=$lons',
+      );
+      final res = await http.get(demUrl).timeout(const Duration(seconds: 3));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final elevations = (data['elevation'] as List<dynamic>?)?.map((e) => (e as num).toDouble()).toList();
+
+        if (elevations != null && elevations.length >= 5) {
+          final eNorth = elevations[1];
+          final eSouth = elevations[2];
+          final eEast = elevations[3];
+          final eWest = elevations[4];
+
+          // Ground distance calculations
+          final metersPerDegLat = 111132.0;
+          final metersPerDegLon = 111320.0 * math.cos(lat * (math.pi / 180.0));
+
+          final distNorthSouth = 2.0 * delta * metersPerDegLat;
+          final distEastWest = 2.0 * delta * metersPerDegLon;
+
+          final gradY = (eNorth - eSouth).abs() / (distNorthSouth > 0 ? distNorthSouth : 1.0);
+          final gradX = (eEast - eWest).abs() / (distEastWest > 0 ? distEastWest : 1.0);
+
+          final slopeFraction = math.sqrt(gradX * gradX + gradY * gradY);
+          final slopePercentage = (slopeFraction * 100.0).clamp(0.2, 75.0);
+          return double.parse(slopePercentage.toStringAsFixed(1));
+        }
+      }
+    } catch (_) {}
+
+    // Fallback based on baseline regional geomorphology
+    return lat > 28.0 ? 18.5 : 2.8;
   }
 
   /// Fetch real-time live satellite weather + elevation + reverse-geocoded place name
@@ -148,7 +199,7 @@ class WeatherService {
         'https://nominatim.openstreetmap.org/reverse?format=json&lat=$latitude&lon=$longitude&zoom=13&addressdetails=1',
       );
       final geoRes = await http.get(geoUrl, headers: {
-        'User-Agent': 'DisasterNet-SDMA-App/2.1 (contact: disastermgmt@sdma.gov.in)',
+        'User-Agent': 'DisasterNet-SDMA-App/2.4 (contact: disastermgmt@sdma.gov.in)',
       }).timeout(const Duration(seconds: 3));
 
       if (geoRes.statusCode == 200) {
@@ -188,6 +239,7 @@ class WeatherService {
         cloudCover: 0,
         pressure: 0.0,
         elevation: 0.0,
+        terrainSlopePercentage: 0.0,
         isDay: true,
         conditionText: 'No Data',
         conditionIcon: Icons.public_off_rounded,
@@ -197,7 +249,12 @@ class WeatherService {
       );
     }
 
-    // Step 2: Fetch Live Satellite Meteorology from Open-Meteo
+    // Step 2: Fetch Live Real DEM Slope and Satellite Meteorology concurrently
+    double calculatedSlope = 2.5;
+    try {
+      calculatedSlope = await calculateRealDemSlope(latitude, longitude);
+    } catch (_) {}
+
     try {
       final url = Uri.parse(
         'https://api.open-meteo.com/v1/forecast?'
@@ -208,7 +265,13 @@ class WeatherService {
       final response = await http.get(url).timeout(const Duration(seconds: 4));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return WeatherData.fromJson(data, locName: placeName, district: stateDistrict, insideIndia: true);
+        return WeatherData.fromJson(
+          data,
+          locName: placeName,
+          district: stateDistrict,
+          insideIndia: true,
+          slopePct: calculatedSlope,
+        );
       }
     } catch (_) {}
 

@@ -79,6 +79,9 @@ class _HabitationSurveyViewState extends State<HabitationSurveyView> {
         await _db.saveSyncQueueItem(syncItem);
 
         // Step 3: Auto-Push Broker (Check connectivity and push if online)
+        if (!_syncService.isInitialized) {
+          await _syncService.initialize('FIELD-NODE');
+        }
         final isConnected = await _syncService.checkConnectivity();
         if (isConnected) {
           await _syncService.processSyncQueue();
@@ -225,7 +228,7 @@ class _HabitationSurveyViewState extends State<HabitationSurveyView> {
                 ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButtonFormField<String>(
-                    value: _pathStatusController.text,
+                    initialValue: _pathStatusController.text,
                     decoration: const InputDecoration(
                       border: InputBorder.none,
                       contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),

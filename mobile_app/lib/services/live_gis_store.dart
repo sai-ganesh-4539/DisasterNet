@@ -12,6 +12,7 @@ class LiveGisStore extends ChangeNotifier {
 
   final DatabaseService _db = DatabaseService();
 
+  bool _bootstrapped = false;
   bool loading = false;
   String? error;
   DateTime? generatedAt;
@@ -19,6 +20,8 @@ class LiveGisStore extends ChangeNotifier {
   Map<String, dynamic> alert = {};
   Map<String, dynamic> summary = {};
   Map<String, dynamic> dataSources = {};
+  Map<String, dynamic> scenario = {};
+  String mode = 'LIVE';
   List<Habitation> habitations = [];
   List<HazardZone> zones = [];
   List<SafeShelter> shelters = [];
@@ -27,16 +30,29 @@ class LiveGisStore extends ChangeNotifier {
   double? lastNorth;
   double? lastEast;
 
-  Future<void> initializeAndRefresh() async {
+  bool get hasLiveData => generatedAt != null || zones.isNotEmpty || habitations.isNotEmpty || shelters.isNotEmpty;
+  bool get isDemoScenarioMode => mode == 'DEMO_SCENARIO';
+  String get scenarioName => scenario['name']?.toString() ?? '';
+
+  Future<void> initializeAndRefresh({bool forceRefresh = false}) async {
     await _db.initialize();
     habitations = await _db.getAllHabitations();
     zones = await _db.getAllHazardZones();
     shelters = await _db.getAllSafeShelters();
     notifyListeners();
+
+    if (_bootstrapped && !forceRefresh) {
+      return;
+    }
+    _bootstrapped = true;
     await refreshFromLocationOrIndia();
   }
 
   Future<void> refreshFromLocationOrIndia() async {
+    if (isDemoScenarioMode) {
+      await refreshBbox(south: 6.5, west: 68.0, north: 37.1, east: 97.4);
+      return;
+    }
     final gps = await _tryGps();
     if (gps != null) {
       await refreshAround(gps.latitude, gps.longitude, padDegrees: 0.55);
@@ -60,6 +76,7 @@ class LiveGisStore extends ChangeNotifier {
     required double north,
     required double east,
   }) async {
+    if (loading) return;
     loading = true;
     error = null;
     notifyListeners();
@@ -86,6 +103,8 @@ class LiveGisStore extends ChangeNotifier {
   Future<void> _applyPayload(Map<String, dynamic> payload) async {
     generatedAt = DateTime.tryParse('${payload['generated_at']}')?.toUtc();
     cacheHit = payload['cache_hit'] == true;
+    mode = payload['mode']?.toString() ?? 'LIVE';
+    scenario = Map<String, dynamic>.from(payload['scenario'] as Map? ?? {});
     alert = Map<String, dynamic>.from(payload['alert'] as Map? ?? {});
     summary = Map<String, dynamic>.from(payload['summary'] as Map? ?? {});
     dataSources = Map<String, dynamic>.from(payload['data_sources'] as Map? ?? {});
@@ -113,6 +132,19 @@ class LiveGisStore extends ChangeNotifier {
     shelters = shelterRows;
   }
 
+  Future<List<Map<String, dynamic>>> fetchDemoScenarios() async {
+    final payload = await LiveGisApi.demoScenarios();
+    return (payload['scenarios'] as List? ?? const [])
+        .whereType<Map>()
+        .map((row) => Map<String, dynamic>.from(row))
+        .toList();
+  }
+
+  Future<void> activateDemoScenario(String scenarioId) async {
+    await LiveGisApi.activateDemoScenario(scenarioId);
+    await refreshBbox(south: 6.5, west: 68.0, north: 37.1, east: 97.4);
+  }
+
   Future<Position?> _tryGps() async {
     try {
       final enabled = await Geolocator.isLocationServiceEnabled();
@@ -121,11 +153,12 @@ class LiveGisStore extends ChangeNotifier {
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
         return null;
       }
-      return Geolocator.getCurrentPosition(timeLimit: const Duration(seconds: 6));
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(timeLimit: Duration(seconds: 6)),
+      );
     } catch (_) {
       return null;
     }
