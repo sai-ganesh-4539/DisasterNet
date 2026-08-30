@@ -1,3 +1,4 @@
+import 'package:field_app/core/json_coercion.dart';
 import 'package:hive/hive.dart';
 
 part 'habitation.g.dart';
@@ -100,39 +101,35 @@ class Habitation extends HiveObject {
   Habitation();
 
   Habitation.fromJson(Map<String, dynamic> json) {
-    habitationId = json['habitation_id'] ?? '';
-    stateCode = json['state_code'] ?? '';
-    districtName = json['district_name'] ?? '';
-    villageName = json['village_name'] ?? '';
-    latitude = (json['latitude'] as num).toDouble();
-    longitude = (json['longitude'] as num).toDouble();
-    totalPopulation = json['total_population'] as int;
-    malePopulation = json['male_population'] as int;
-    femalePopulation = json['female_population'] as int;
-    population0to6 = json['population_0_6'] as int;
-    population60Plus = json['population_60_plus'] as int;
-    literacyRate = (json['literacy_rate'] as num).toDouble();
-    priorityScore = (json['priority_score'] as num).toDouble();
-    priorityCategory = json['priority_category'] ?? 'UNKNOWN';
-    expertCategory = json['expert_category'] ?? 'UNKNOWN';
-    mlCategory = json['ml_category'] ?? 'UNKNOWN';
-    proximityToHazardKm = (json['proximity_to_hazard_km'] as num?)?.toDouble() ?? 0.0;
-    elevation = (json['elevation'] as num?)?.toDouble() ?? 0.0;
-    slopePercentage = (json['slope_percentage'] as num?)?.toDouble() ?? 0.0;
-    hasAccessRoad = json['has_access_road'] as bool? ?? true;
-    pathStatus = json['path_status'] ?? 'CLEAR';
-    geometryWkt = json['geometry_wkt'] ?? '';
-    assessmentTimestamp = DateTime.parse(json['assessment_timestamp']);
-    modelVersion = json['model_version'] ?? '1.0.0';
-    isSynced = json['is_synced'] ?? true;
-    lastSyncedAt = json['last_synced_at'] != null
-        ? DateTime.parse(json['last_synced_at'])
-        : null;
-    fieldSurveyNotes = json['field_survey_notes'];
-    lastFieldVisit = json['last_field_visit'] != null
-        ? DateTime.parse(json['last_field_visit'])
-        : null;
-    surveyorId = json['surveyor_id'];
+    habitationId = asString(json['habitation_id']);
+    stateCode = asString(json['state_code'], 'IN');
+    districtName = asString(json['district_name']);
+    villageName = asString(json['village_name'], 'Unnamed settlement');
+    latitude = asDouble(json['latitude']);
+    longitude = asDouble(json['longitude']);
+    totalPopulation = asInt(json['total_population']);
+    malePopulation = asInt(json['male_population'], totalPopulation ~/ 2);
+    femalePopulation = asInt(json['female_population'], totalPopulation - malePopulation);
+    population0to6 = asInt(json['population_0_6']);
+    population60Plus = asInt(json['population_60_plus']);
+    literacyRate = asDouble(json['literacy_rate']);
+    priorityScore = asDouble(json['priority_score']);
+    priorityCategory = asString(json['priority_category'], 'MEDIUM_TERM');
+    expertCategory = asString(json['expert_category'], priorityCategory);
+    mlCategory = asString(json['ml_category'], priorityCategory);
+    proximityToHazardKm = asDouble(json['proximity_to_hazard_km']);
+    elevation = asDouble(json['elevation']);
+    slopePercentage = asDouble(json['slope_percentage']);
+    hasAccessRoad = asBool(json['has_access_road'], true);
+    pathStatus = asString(json['path_status'], 'CLEAR');
+    geometryWkt = asString(json['geometry_wkt']);
+    assessmentTimestamp = asDateTime(json['assessment_timestamp']);
+    modelVersion = asString(json['model_version'], '3.0.0');
+    isSynced = asBool(json['is_synced'], true);
+    lastSyncedAt = json['last_synced_at'] != null ? asDateTime(json['last_synced_at']) : DateTime.now().toUtc();
+    fieldSurveyNotes = json['field_survey_notes']?.toString();
+    lastFieldVisit = json['last_field_visit'] != null ? asDateTime(json['last_field_visit']) : null;
+    surveyorId = json['surveyor_id']?.toString();
   }
 
   Map<String, dynamic> toJson() {

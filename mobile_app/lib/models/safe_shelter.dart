@@ -1,3 +1,4 @@
+import 'package:field_app/core/json_coercion.dart';
 import 'package:hive/hive.dart';
 
 part 'safe_shelter.g.dart';
@@ -113,43 +114,39 @@ class SafeShelter extends HiveObject {
   SafeShelter();
 
   SafeShelter.fromJson(Map<String, dynamic> json) {
-    shelterId = json['shelter_id'] ?? '';
-    stateCode = json['state_code'] ?? '';
-    districtName = json['district_name'] ?? '';
-    shelterName = json['shelter_name'] ?? '';
-    shelterType = json['shelter_type'] ?? 'UNKNOWN';
-    latitude = (json['latitude'] as num).toDouble();
-    longitude = (json['longitude'] as num).toDouble();
-    totalCapacity = json['total_capacity'] as int;
-    effectiveCapacity = json['effective_capacity'] as int;
-    availableCapacity = json['available_capacity'] as int;
-    utilizationPercentage = (json['utilization_percentage'] as num).toDouble();
-    currentPopulation = json['current_population'] as int;
-    waterAvailableLiters = json['water_available_liters'] as int;
-    foodAvailableKg = json['food_available_kg'] as int;
-    medicalKitsAvailable = json['medical_kits_available'] as int;
-    generatorFuelLiters = json['generator_fuel_liters'] as int;
-    capacityConstraint = json['capacity_constraint'] ?? 'NONE';
-    capacityStatus = json['capacity_status'] ?? 'UNKNOWN';
-    isInSafeZone = json['is_in_safe_zone'] as bool? ?? true;
-    safetyBufferKm = (json['safety_buffer_km'] as num?)?.toDouble() ?? 0.0;
-    hasGenerator = json['has_generator'] as bool? ?? false;
-    hasMedicalFacility = json['has_medical_facility'] as bool? ?? false;
-    hasKitchen = json['has_kitchen'] as bool? ?? false;
-    hasToilets = json['has_toilets'] as bool? ?? false;
-    accessRoadStatus = json['access_road_status'] ?? 'CLEAR';
-    geometryWkt = json['geometry_wkt'] ?? '';
-    evaluationTimestamp = DateTime.parse(json['evaluation_timestamp']);
-    modelVersion = json['model_version'] ?? '1.0.0';
-    isSynced = json['is_synced'] ?? true;
-    lastSyncedAt = json['last_synced_at'] != null
-        ? DateTime.parse(json['last_synced_at'])
-        : null;
-    fieldSurveyNotes = json['field_survey_notes'];
-    lastFieldVisit = json['last_field_visit'] != null
-        ? DateTime.parse(json['last_field_visit'])
-        : null;
-    surveyorId = json['surveyor_id'];
+    shelterId = asString(json['shelter_id']);
+    stateCode = asString(json['state_code'], 'IN');
+    districtName = asString(json['district_name']);
+    shelterName = asString(json['shelter_name'], 'Candidate site');
+    shelterType = asString(json['shelter_type'], 'UNKNOWN');
+    latitude = asDouble(json['latitude']);
+    longitude = asDouble(json['longitude']);
+    totalCapacity = asInt(json['total_capacity']);
+    effectiveCapacity = asInt(json['effective_capacity'], totalCapacity);
+    availableCapacity = asInt(json['available_capacity'], effectiveCapacity);
+    utilizationPercentage = asDouble(json['utilization_percentage']);
+    currentPopulation = asInt(json['current_population']);
+    waterAvailableLiters = asInt(json['water_available_liters']);
+    foodAvailableKg = asInt(json['food_available_kg']);
+    medicalKitsAvailable = asInt(json['medical_kits_available']);
+    generatorFuelLiters = asInt(json['generator_fuel_liters']);
+    capacityConstraint = asString(json['capacity_constraint'], 'NONE');
+    capacityStatus = asString(json['capacity_status'], 'AVAILABLE');
+    isInSafeZone = asBool(json['is_in_safe_zone'], true);
+    safetyBufferKm = asDouble(json['safety_buffer_km']);
+    hasGenerator = asBool(json['has_generator']);
+    hasMedicalFacility = asBool(json['has_medical_facility']);
+    hasKitchen = asBool(json['has_kitchen']);
+    hasToilets = asBool(json['has_toilets'], true);
+    accessRoadStatus = asString(json['access_road_status'], 'CLEAR');
+    geometryWkt = asString(json['geometry_wkt']);
+    evaluationTimestamp = asDateTime(json['evaluation_timestamp']);
+    modelVersion = asString(json['model_version'], '3.0.0');
+    isSynced = asBool(json['is_synced'], true);
+    lastSyncedAt = json['last_synced_at'] != null ? asDateTime(json['last_synced_at']) : DateTime.now().toUtc();
+    fieldSurveyNotes = json['field_survey_notes']?.toString();
+    lastFieldVisit = json['last_field_visit'] != null ? asDateTime(json['last_field_visit']) : null;
+    surveyorId = json['surveyor_id']?.toString();
   }
 
   Map<String, dynamic> toJson() {

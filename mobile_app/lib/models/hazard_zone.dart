@@ -1,3 +1,4 @@
+import 'package:field_app/core/json_coercion.dart';
 import 'package:hive/hive.dart';
 
 part 'hazard_zone.g.dart';
@@ -52,22 +53,20 @@ class HazardZone extends HiveObject {
   HazardZone();
 
   HazardZone.fromJson(Map<String, dynamic> json) {
-    zoneId = json['zone_id'] ?? '';
-    gridId = json['grid_id'] ?? '';
-    latitude = (json['latitude'] as num).toDouble();
-    longitude = (json['longitude'] as num).toDouble();
-    riskScore = (json['risk_score'] as num).toDouble();
-    isRedZone = json['is_red_zone'] as bool;
-    riskLevel = json['risk_level'] ?? 'UNKNOWN';
-    hazardType = json['hazard_type'] ?? 'UNKNOWN';
-    geometryWkt = json['geometry_wkt'] ?? '';
-    predictionTimestamp = DateTime.parse(json['prediction_timestamp']);
-    modelVersion = json['model_version'] ?? '1.0.0';
-    isSynced = json['is_synced'] ?? true;
-    lastSyncedAt = json['last_synced_at'] != null
-        ? DateTime.parse(json['last_synced_at'])
-        : null;
-    timeHorizon = json['time_horizon'];
+    zoneId = asString(json['zone_id']);
+    gridId = asString(json['grid_id']);
+    latitude = asDouble(json['latitude']);
+    longitude = asDouble(json['longitude']);
+    riskScore = asDouble(json['risk_score']);
+    isRedZone = asBool(json['is_red_zone'], true);
+    riskLevel = asString(json['risk_level'], 'UNKNOWN');
+    hazardType = asString(json['hazard_type'], 'UNKNOWN');
+    geometryWkt = asString(json['geometry_wkt']);
+    predictionTimestamp = asDateTime(json['prediction_timestamp']);
+    modelVersion = asString(json['model_version'], '3.0.0');
+    isSynced = asBool(json['is_synced'], true);
+    lastSyncedAt = json['last_synced_at'] != null ? asDateTime(json['last_synced_at']) : DateTime.now().toUtc();
+    timeHorizon = json['time_horizon']?.toString();
   }
 
   Map<String, dynamic> toJson() {

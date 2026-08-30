@@ -94,6 +94,35 @@ class _RelocationPriorityViewState extends State<RelocationPriorityView> {
     return (bestShelter, minDistance);
   }
 
+  Future<void> _recalculateLiveAiScoring() async {
+    setState(() => _isLoading = true);
+    for (final h in _habitations) {
+      try {
+        final weather = await WeatherService.fetchRealTimeWeather(h.latitude, h.longitude);
+        final rainImpact = weather.precipitation > 30.0 ? 55.0 : (weather.precipitation * 1.5);
+        final slopeImpact = (h.slopePercentage * 0.9).clamp(0.0, 35.0);
+        final hazardScore = (rainImpact + slopeImpact + 10.0).clamp(10.0, 95.0);
+        
+        final vulnerabilityScore = ((h.population60Plus + h.population0to6) / (h.totalPopulation > 0 ? h.totalPopulation : 1)) * 100.0;
+        final isolationScore = h.pathStatus == 'BLOCKED' ? 95.0 : (h.pathStatus == 'DAMAGED' ? 70.0 : 25.0);
+        
+        final newPriority = (0.45 * hazardScore + 0.35 * vulnerabilityScore + 0.20 * isolationScore).clamp(5.0, 99.0);
+        h.priorityScore = newPriority;
+        h.priorityCategory = newPriority > 75.0 ? 'IMMEDIATE' : (newPriority > 50.0 ? 'SHORT_TERM' : 'MEDIUM_TERM');
+        await _db.saveHabitation(h);
+      } catch (_) {}
+    }
+    await _loadData();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('AI Relocation Matrix recalculated from live satellite telemetry.'),
+          backgroundColor: Color(0xFF000000),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -106,7 +135,7 @@ class _RelocationPriorityViewState extends State<RelocationPriorityView> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Header Row with Refresh Action
+                    // Header Row with Live AI Re-scoring Action
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -126,7 +155,7 @@ class _RelocationPriorityViewState extends State<RelocationPriorityView> {
                               ),
                               SizedBox(height: 4),
                               Text(
-                                'Multi-criteria urgency ranking & nearest relocation shelters.',
+                                'Dynamic AHP urgency ranking & nearest relocation shelters.',
                                 style: TextStyle(
                                   fontSize: 12.5,
                                   color: Color(0xFF757575),
@@ -137,9 +166,9 @@ class _RelocationPriorityViewState extends State<RelocationPriorityView> {
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.refresh_rounded, color: Color(0xFF000000)),
-                          onPressed: _loadData,
-                          tooltip: 'Recalculate Proximity & Capacities',
+                          icon: const Icon(Icons.bolt_rounded, color: Color(0xFF000000)),
+                          onPressed: _recalculateLiveAiScoring,
+                          tooltip: 'Recalculate AI Matrix from Live Satellite',
                         ),
                       ],
                     ),

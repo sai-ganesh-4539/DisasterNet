@@ -1,6 +1,22 @@
+import 'package:flutter/foundation.dart';
+
 class AppConfig {
-  // Backend API Configuration
-  static const String baseUrl = 'http://localhost:8000';
+  // --dart-define=API_HOST=192.168.1.10 for a physical device
+  static const String _apiHostOverride = String.fromEnvironment('API_HOST');
+
+  static String get baseUrl {
+    if (_apiHostOverride.isNotEmpty) {
+      return _apiHostOverride.startsWith('http')
+          ? _apiHostOverride
+          : 'http://$_apiHostOverride:8000';
+    }
+    if (kIsWeb) return 'http://127.0.0.1:8000';
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return 'http://10.0.2.2:8000';
+    }
+    return 'http://127.0.0.1:8000';
+  }
+
   static const String apiVersion = 'v1';
 
   // Sync Endpoints

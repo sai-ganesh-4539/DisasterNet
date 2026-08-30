@@ -10,7 +10,8 @@ from app.api.v1.endpoints import (
     priorities,
     data,
     sync,
-    config
+    config,
+    gis,
 )
 
 api_router = APIRouter()
@@ -24,3 +25,4 @@ api_router.include_router(priorities.router, prefix="/priorities", tags=["Priori
 api_router.include_router(data.router, prefix="/data", tags=["Data Ingestion"])
 api_router.include_router(sync.router, prefix="/sync", tags=["Sync"])
 api_router.include_router(config.router, prefix="/config", tags=["Configuration"])
+api_router.include_router(gis.router, prefix="/gis", tags=["Live GIS"])

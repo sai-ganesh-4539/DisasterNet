@@ -390,63 +390,32 @@ class _MapHUDViewState extends State<MapHUDView> {
                 userAgentPackageName: 'com.disastermgmt.field_app',
               ),
 
-              // Dynamic Calibrated Circular Red Zones (Requirement 1: Circles with exact meter radii)
+              // Dynamic Calibrated Circular Red Zones from Live Hazard Zone Database
               CircleLayer(
                 circles: [
-                  // 1. Odisha Coastal & Deltaic Red Zone (Astaranga/Puri): 7.5 km radius
-                  CircleMarker(
-                    point: const LatLng(19.9820, 86.2730),
-                    radius: 7500,
-                    useRadiusInMeter: true,
-                    color: const Color(0xFFDC2626).withOpacity(0.28),
-                    borderColor: const Color(0xFFDC2626),
-                    borderStrokeWidth: 2.0,
-                  ),
-                  // 2. Odisha Ersama Estuary Inundation Zone: 6.0 km radius
-                  CircleMarker(
-                    point: const LatLng(20.1450, 86.6120),
-                    radius: 6000,
-                    useRadiusInMeter: true,
-                    color: const Color(0xFFDC2626).withOpacity(0.26),
-                    borderColor: const Color(0xFFDC2626),
-                    borderStrokeWidth: 2.0,
-                  ),
-                  // 3. Chhattisgarh Mahanadi & Shivnath Basin (Rajim): 8.0 km radius
-                  CircleMarker(
-                    point: const LatLng(20.9650, 81.8820),
-                    radius: 8000,
-                    useRadiusInMeter: true,
-                    color: const Color(0xFFDC2626).withOpacity(0.25),
-                    borderColor: const Color(0xFFDC2626),
-                    borderStrokeWidth: 2.0,
-                  ),
-                  // 4. Gangetic West Bengal & Sundarbans (Gosaba): 7.0 km radius
-                  CircleMarker(
-                    point: const LatLng(22.1650, 88.8050),
-                    radius: 7000,
-                    useRadiusInMeter: true,
-                    color: const Color(0xFFDC2626).withOpacity(0.28),
-                    borderColor: const Color(0xFFDC2626),
-                    borderStrokeWidth: 2.0,
-                  ),
-                  // 5. North Andhra Pradesh Srikakulam Surge Zone: 6.5 km radius
-                  CircleMarker(
-                    point: const LatLng(18.5720, 84.3410),
-                    radius: 6500,
-                    useRadiusInMeter: true,
-                    color: const Color(0xFFD97706).withOpacity(0.24),
-                    borderColor: const Color(0xFFD97706),
-                    borderStrokeWidth: 1.8,
-                  ),
-                  // 6. Himalayan Chamoli Landslide Hazard Zone: 4.5 km radius
-                  CircleMarker(
-                    point: const LatLng(30.5280, 79.5120),
-                    radius: 4500,
-                    useRadiusInMeter: true,
-                    color: const Color(0xFFDC2626).withOpacity(0.26),
-                    borderColor: const Color(0xFFDC2626),
-                    borderStrokeWidth: 2.0,
-                  ),
+                  ..._hazardZones.map((zone) {
+                    final double radiusMeters = (zone.riskScore * 85).clamp(4500.0, 9000.0);
+                    final isCritical = zone.riskScore > 80;
+                    return CircleMarker(
+                      point: LatLng(zone.latitude, zone.longitude),
+                      radius: radiusMeters,
+                      useRadiusInMeter: true,
+                      color: isCritical
+                          ? const Color(0xFFDC2626).withOpacity(0.28)
+                          : const Color(0xFFD97706).withOpacity(0.25),
+                      borderColor: isCritical ? const Color(0xFFDC2626) : const Color(0xFFD97706),
+                      borderStrokeWidth: isCritical ? 2.0 : 1.8,
+                    );
+                  }),
+                  if (_tappedLocation != null && _tappedVulnerability['is_disaster_prone'] == true)
+                    CircleMarker(
+                      point: _tappedLocation!,
+                      radius: (((_tappedVulnerability['risk_score'] as num?)?.toDouble() ?? 50.0) * 75).clamp(3500.0, 8500.0),
+                      useRadiusInMeter: true,
+                      color: const Color(0xFFDC2626).withOpacity(0.25),
+                      borderColor: const Color(0xFFDC2626),
+                      borderStrokeWidth: 2.0,
+                    ),
                 ],
               ),
 

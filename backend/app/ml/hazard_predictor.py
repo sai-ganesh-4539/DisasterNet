@@ -80,29 +80,36 @@ class HazardPredictor(BaseMLModel):
         # Generate synthetic training data for demonstration
         # In production, this would be replaced with actual trained model loading
         
-        n_samples = 1000
-        np.random.seed(42)
-        
-        # Generate features
-        X = np.random.rand(n_samples, 7)
-        
-        # Generate labels based on heuristic rules (simulating trained model behavior)
-        y = []
-        for i in range(n_samples):
-            precip_24h = X[i, 0] * 100  # 0-100mm
-            precip_72h = X[i, 1] * 200  # 0-200mm
-            slope = X[i, 2] * 50  # 0-50%
-            elevation = X[i, 3] * 2000  # 0-2000m
-            soil_moisture = X[i, 5]  # 0-1
-            
-            # Heuristic risk calculation
-            risk_score = (precip_24h * 0.3 + precip_72h * 0.2 + slope * 0.25 + 
-                         (elevation / 2000) * 0.1 + soil_moisture * 0.15)
-            
-            # Classify as high risk if score > threshold
-            y.append(1 if risk_score > 0.6 else 0)
-        
-        self.model.fit(X, np.array(y))
+        n_samples = 2500
+        rng = np.random.default_rng(42)
+
+        precip_24 = rng.gamma(2.0, 18.0, n_samples).clip(0, 220)
+        precip_72 = (precip_24 + rng.gamma(2.0, 25.0, n_samples)).clip(0, 400)
+        slope = rng.beta(2.0, 5.0, n_samples) * 55
+        elevation = rng.uniform(0, 3500, n_samples)
+        lithology = rng.integers(0, 6, n_samples)
+        soil = np.clip(0.15 + precip_72 / 250.0 + rng.normal(0, 0.08, n_samples), 0, 1)
+        veg = np.clip(0.6 - slope / 100.0 + rng.normal(0, 0.1, n_samples), 0.05, 0.95)
+
+        X = np.column_stack([
+            precip_24 / 100.0,
+            precip_72 / 200.0,
+            slope / 50.0,
+            elevation / 2000.0,
+            lithology / 5.0,
+            soil,
+            veg,
+        ])
+
+        physical = (
+            precip_24 * 0.45
+            + precip_72 * 0.12
+            + slope * 1.1
+            + np.where(elevation < 40, 28.0, 0.0)
+            + soil * 15.0
+        )
+        y = (physical >= 55).astype(int)
+        self.model.fit(X, y)
     
     def predict(self, features: Dict[str, Any]) -> Dict[str, Any]:
         """Make hazard prediction for a grid cell"""
