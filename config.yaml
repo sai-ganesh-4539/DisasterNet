@@ -1,0 +1,201 @@
+# Disaster Management Platform Configuration
+
+# Spatial Grid Configuration
+spatial:
+  grid:
+    default_resolution: 100  # meters
+    min_resolution: 50
+    max_resolution: 500
+    # Region-specific overrides
+    regional_overrides:
+      # Example: "uttarakhand": 50, "kerala": 75
+  
+  # Risk threshold configuration
+  risk_thresholds:
+    default: 75  # percentage
+    # Hazard-specific thresholds
+    hazard_specific:
+      landslide: 70
+      flood: 75
+      coastal_erosion: 80
+      cloudburst: 65
+    # Region-specific thresholds
+    regional_specific:
+      # Example: "himachal_pradesh": 70
+
+# Time Horizon Configuration
+time_horizons:
+  immediate:
+    name: "Immediate"
+    description: "Critical priority - evacuation required"
+    max_hours: 24
+    color: "#FF0000"
+  
+  short_term:
+    name: "Short-Term"
+    description: "High priority - pre-stage assets"
+    min_weeks: 1
+    max_weeks: 4
+    color: "#FFA500"
+  
+  medium_term:
+    name: "Medium-Term"
+    description: "Moderate priority - planned relocation"
+    min_months: 1
+    max_months: 6
+    color: "#00FF00"
+
+# Priority Scoring Configuration
+priority_scoring:
+  # Initial expert-defined weights (will be refined by ML over time)
+  weights:
+    hazard_intensity: 0.35
+    population_vulnerability: 0.30
+    access_limitations: 0.20
+    disaster_history: 0.15
+  
+  # Population vulnerability factors
+  vulnerability_factors:
+    population_density: 0.3
+    elderly_percentage: 0.25
+    child_percentage: 0.2
+    disability_percentage: 0.15
+    economic_status: 0.1
+  
+  # Access limitation factors
+  access_factors:
+    road_connectivity: 0.4
+    distance_to_emergency: 0.3
+    communication_availability: 0.2
+    evacuation_route_status: 0.1
+  
+  # ML refinement settings
+  ml_refinement:
+    enabled: true
+    min_data_points: 1000
+    retraining_interval_days: 30
+    confidence_threshold: 0.7
+
+# Shelter Capacity Configuration
+shelter_capacity:
+  # Resource weights for bottleneck calculation
+  resource_weights:
+    physical_beds: 1.0
+    water_sufficiency_days: 1.0
+    food_ration_storage: 1.0
+    medical_facility_depth: 1.0
+  
+  # Minimum resource requirements per person
+  minimum_resources:
+    water_liters_per_day: 15
+    food_calories_per_day: 2000
+    medical_beds_per_1000: 5
+  
+  # Safety buffer percentage
+  safety_buffer: 0.1  # 10% buffer
+
+# Data Ingestion Configuration
+data_ingestion:
+  # ISRO Bhuvan configuration
+  isro_bhuvan:
+    enabled: true
+    update_frequency: "weekly"
+    data_types:
+      - elevation
+      - slope
+      - lithology
+      - land_use
+  
+  # IMD Rainfall configuration
+  imd_rainfall:
+    enabled: true
+    update_frequency: "hourly"
+    api_type: "live"
+    radar_data: true
+    station_data: true
+  
+  # Census data configuration
+  census:
+    enabled: true
+    update_frequency: "yearly"
+    api_type: "batch"
+    data_types:
+      - population
+      - demographics
+      - housing
+      - amenities
+
+# ML Model Configuration
+ml_models:
+  hazard_predictor:
+    model_type: "pretrained"
+    framework: "xgboost"
+    features:
+      - precipitation
+      - slope
+      - elevation
+      - lithology
+      - soil_moisture
+      - vegetation_index
+    prediction_threshold: 0.75
+  
+  capacity_evaluator:
+    model_type: "rule_based"
+    framework: "custom"
+  
+  priority_classifier:
+    model_type: "hybrid"
+    framework: "scikit-learn"
+    algorithm: "random_forest"
+    expert_weight: 0.6
+    ml_weight: 0.4
+
+# API Configuration
+api:
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 60
+    burst_size: 10
+  
+  pagination:
+    default_page_size: 50
+    max_page_size: 500
+  
+  caching:
+    enabled: true
+    ttl_seconds: 300  # 5 minutes
+    spatial_query_cache: true
+
+# Sync Configuration (Offline-First)
+sync:
+  enabled: true
+  compression: true
+  compression_level: 6
+  conflict_resolution: "last_write_wins"
+  max_payload_size_mb: 10
+  signature_validation: true
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "json"
+  file:
+    enabled: true
+    path: "./logs/app.log"
+    max_size_mb: 100
+    backup_count: 5
+  console:
+    enabled: true
+
+# Performance Configuration
+performance:
+  connection_pool_size: 20
+  max_overflow: 10
+  pool_timeout: 30
+  query_timeout: 60
+  
+  # Spatial query optimization
+  spatial_indexing: true
+  query_caching: true
+  parallel_processing: true
+  max_workers: 4
