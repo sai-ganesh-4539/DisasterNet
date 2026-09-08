@@ -48,6 +48,19 @@ class Settings(BaseSettings):
     bootstrap_analyst_password: str = Field(default="ChangeMe123!")
     bootstrap_field_username: str = Field(default="field_survey")
     bootstrap_field_password: str = Field(default="ChangeMe123!")
+    bootstrap_field_officer_username: str = Field(default="field_officer")
+    bootstrap_field_officer_password: str = Field(default="ChangeMe123!")
+    bootstrap_citizen_username: str = Field(default="citizen")
+    bootstrap_citizen_password: str = Field(default="ChangeMe123!")
+
+    # Citizen self-registration / OTP (prototype-only)
+    allow_anonymous_citizen: bool = Field(default=True)
+    citizen_otp_secret: str = Field(default="disasternet-citizen-otp-secret")
+
+    # Offline SOS mesh config
+    sos_mesh_max_hops: int = Field(default=4)
+    sos_sms_gateway_number: Optional[str] = Field(default=None)
+    sos_ttl_minutes: int = Field(default=180)
 
     # ML Model Configuration
     model_path: str = Field(default="./models")

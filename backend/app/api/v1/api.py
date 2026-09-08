@@ -5,17 +5,21 @@ API v1 Router
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    alerts,
     auth,
     config,
+    crowd_reports,
     data,
     demo,
     gis,
+    gis_ext,
     habitations,
     hazards,
     operations,
     priorities,
     red_zones,
     shelters,
+    sos,
     sync,
 )
 
@@ -35,4 +39,8 @@ api_router.include_router(demo.router, prefix="/demo", tags=["Demo Scenarios"])
 api_router.include_router(sync.router, prefix="/sync", tags=["Sync"])
 api_router.include_router(config.router, prefix="/config", tags=["Configuration"])
 api_router.include_router(gis.router, prefix="/gis", tags=["Live GIS"])
+api_router.include_router(gis_ext.router, prefix="/gis", tags=["GIS Extensions"])
 api_router.include_router(operations.router, prefix="/operations", tags=["Operations"])
+api_router.include_router(sos.router, prefix="/sos", tags=["SOS (offline mesh)"])
+api_router.include_router(alerts.router, prefix="/alerts", tags=["Live Official Alerts"])
+api_router.include_router(crowd_reports.router, prefix="/crowd-reports", tags=["Crowd Reports"])

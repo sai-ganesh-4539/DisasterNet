@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:field_app/core/config.dart';
 import 'package:field_app/services/local_demo_data.dart';
@@ -256,6 +257,40 @@ class LiveGisApi {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
+  // ---------------------------------------------------------------------------
+  // Citizen self-registration via OTP
+  // ---------------------------------------------------------------------------
+  static Future<Map<String, dynamic>> citizenRequestOtp({required String phoneNumber}) async {
+    final response = await http
+        .post(
+          _uri('/api/v1/auth/citizen/request-otp'),
+          headers: _headers(json: true),
+          body: jsonEncode({'phone_number': phoneNumber}),
+        )
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception('OTP request failed (${response.statusCode}): ${response.body}');
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  static Future<Map<String, dynamic>> citizenVerifyOtp({required String phoneNumber, required String otp}) async {
+    final response = await http
+        .post(
+          _uri('/api/v1/auth/citizen/verify-otp'),
+          headers: _headers(json: true),
+          body: jsonEncode({'phone_number': phoneNumber, 'otp': otp}),
+        )
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception('OTP verification failed (${response.statusCode}): ${response.body}');
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Operations dashboard
+  // ---------------------------------------------------------------------------
   static Future<Map<String, dynamic>> operationsDashboard({
     required String token,
     String? stateCode,
@@ -283,6 +318,9 @@ class LiveGisApi {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
+  // ---------------------------------------------------------------------------
+  // Demo scenarios
+  // ---------------------------------------------------------------------------
   static Future<Map<String, dynamic>> demoScenarios() async {
     try {
       final response = await http.get(
@@ -324,6 +362,352 @@ class LiveGisApi {
           : 'Backend unreachable. The app remains on the bundled offline scenario for the device demo.',
       'mode': 'DEMO_SCENARIO',
       'scenario': _bundledScenario(),
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // SOS endpoints — layered offline mesh (server / mesh relay / SMS gateway)
+  // ---------------------------------------------------------------------------
+  static String _genUuid() {
+    final r = math.Random();
+    final hex = List.generate(16, (_) => r.nextInt(16).toRadixString(16)).join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}';
+  }
+
+  /// Submit an SOS to the central server (Layer 1 — direct server).
+  /// Returns the parsed response or null if the server was unreachable.
+  /// On failure the caller should retry as a mesh relay (Layer 2) or
+  /// SMS gateway payload (Layer 3).
+  static Future<Map<String, dynamic>?> sosSubmit({
+    required String deviceId,
+    double? latitude,
+    double? longitude,
+    String category = 'MEDICAL',
+    String severity = 'HIGH',
+    String message = '',
+    int? peopleCount,
+    String? contactPhone,
+    String originLayer = 'SERVER_DIRECT',
+    List<String> relayedThrough = const [],
+    int hopCount = 0,
+    String? token,
+  }) async {
+    final sosId = _genUuid();
+    final body = {
+      'sos_id': sosId,
+      'device_id': deviceId,
+      'latitude': latitude,
+      'longitude': longitude,
+      'category': category,
+      'severity': severity,
+      'message': message,
+      if (peopleCount != null) 'people_count': peopleCount,
+      if (contactPhone != null) 'contact_phone': contactPhone,
+      'origin_layer': originLayer,
+      'relayed_through': relayedThrough,
+      'hop_count': hopCount,
+      'timestamp': DateTime.now().toUtc().toIso8601String(),
+    };
+    try {
+      final response = await http
+          .post(
+            _uri('/api/v1/sos/submit'),
+            headers: _headers(token: token, json: true),
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 30));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Relay an SOS that was received from another phone in the mesh (Layer 2).
+  static Future<Map<String, dynamic>?> sosRelay({
+    required String deviceId,
+    required Map<String, dynamic> sosPayload,
+    String? token,
+  }) async {
+    try {
+      final response = await http
+          .post(
+            _uri('/api/v1/sos/relay'),
+            headers: _headers(token: token, json: true),
+            body: jsonEncode(sosPayload),
+          )
+          .timeout(const Duration(seconds: 30));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Fetch SOSes near a given point (citizen view).
+  static Future<List<Map<String, dynamic>>> sosList({
+    double? latitude,
+    double? longitude,
+    double radiusKm = 25.0,
+    String? category,
+    String? severity,
+    int limit = 50,
+    String? token,
+  }) async {
+    final query = <String, String>{
+      if (latitude != null) 'latitude': latitude.toStringAsFixed(5),
+      if (longitude != null) 'longitude': longitude.toStringAsFixed(5),
+      'radius_km': radiusKm.toStringAsFixed(1),
+      if (category != null) 'category': category,
+      if (severity != null) 'severity': severity,
+      'limit': limit.toString(),
+    };
+    try {
+      final response = await http.get(
+        _uri('/api/v1/sos/', query),
+        headers: _headers(token: token),
+      ).timeout(const Duration(seconds: 30));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return (data['items'] as List? ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  static Future<Map<String, dynamic>?> sosAcknowledge({
+    required String sosId,
+    required String token,
+    String? note,
+  }) async {
+    try {
+      final response = await http
+          .post(
+            _uri('/api/v1/sos/$sosId/acknowledge'),
+            headers: _headers(token: token, json: true),
+            body: jsonEncode({'note': note}),
+          )
+          .timeout(const Duration(seconds: 30));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Live official alerts (NDMA, IMD, USGS, OpenWeather, NASA EONET)
+  // ---------------------------------------------------------------------------
+  static Future<Map<String, dynamic>> liveAlerts({
+    double? latitude,
+    double? longitude,
+    List<String>? sourceFilter,
+  }) async {
+    final query = <String, String>{
+      if (latitude != null) 'latitude': latitude.toStringAsFixed(5),
+      if (longitude != null) 'longitude': longitude.toStringAsFixed(5),
+      if (sourceFilter != null && sourceFilter.isNotEmpty) 'source_filter': sourceFilter.join(','),
+    };
+    try {
+      final response = await http.get(_uri('/api/v1/alerts/live', query)).timeout(const Duration(seconds: 60));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    // Bundled fallback — show 3 curated alerts when offline
+    return {
+      'server_time': DateTime.now().toUtc().toIso8601String(),
+      'from_cache': false,
+      'sources_attempted': ['BUNDLED_FALLBACK'],
+      'counts_by_source': {'BUNDLED_FALLBACK': 3},
+      'items': [
+        {
+          'source': 'BUNDLED_FALLBACK',
+          'type': 'INFO',
+          'title': 'Backend unreachable — bundled offline alerts',
+          'summary': 'The DisasterNet backend could not be reached. Showing bundled alerts only. Pull to retry.',
+          'timestamp': DateTime.now().toUtc().toIso8601String(),
+        }
+      ],
+      'errors': [],
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Crowd-sourced reports
+  // ---------------------------------------------------------------------------
+  static Future<Map<String, dynamic>?> submitCrowdReport({
+    required String category,
+    required String severity,
+    required double latitude,
+    required double longitude,
+    String description = '',
+    int? peopleAffected,
+    int? casualties,
+    String? photoUrl,
+    String? contactPhone,
+    String? token,
+  }) async {
+    try {
+      final response = await http
+          .post(
+            _uri('/api/v1/crowd-reports/submit'),
+            headers: _headers(token: token, json: true),
+            body: jsonEncode({
+              'category': category,
+              'severity': severity,
+              'latitude': latitude,
+              'longitude': longitude,
+              'description': description,
+              if (peopleAffected != null) 'people_affected': peopleAffected,
+              if (casualties != null) 'casualties': casualties,
+              if (photoUrl != null) 'photo_url': photoUrl,
+              if (contactPhone != null) 'contact_phone': contactPhone,
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<List<Map<String, dynamic>>> crowdReports({
+    double? latitude,
+    double? longitude,
+    double radiusKm = 25.0,
+    String? category,
+    String? severity,
+    String? token,
+  }) async {
+    final query = <String, String>{
+      if (latitude != null) 'latitude': latitude.toStringAsFixed(5),
+      if (longitude != null) 'longitude': longitude.toStringAsFixed(5),
+      'radius_km': radiusKm.toStringAsFixed(1),
+      if (category != null) 'category': category,
+      if (severity != null) 'severity': severity,
+    };
+    try {
+      final response = await http.get(
+        _uri('/api/v1/crowd-reports/', query),
+        headers: _headers(token: token),
+      ).timeout(const Duration(seconds: 30));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return (data['items'] as List? ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  // ---------------------------------------------------------------------------
+  // GIS extensions — layered map, spatial analysis, routing, reverse geocoding
+  // ---------------------------------------------------------------------------
+  static Future<List<Map<String, dynamic>>> gisLayers({String? token}) async {
+    try {
+      final response = await http.get(
+        _uri('/api/v1/gis/layers'),
+        headers: _headers(token: token),
+      ).timeout(const Duration(seconds: 30));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return (data['layers'] as List? ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+      }
+    } catch (_) {}
+    return _bundledLayers();
+  }
+
+  static List<Map<String, dynamic>> _bundledLayers() {
+    return [
+      {'layer_id': 'red_zones', 'name': 'Red Zones (AI hazard polygons)', 'geometry_type': 'Polygon', 'default_visible': true, 'is_official': true, 'source': 'DisasterNet'},
+      {'layer_id': 'shelters', 'name': 'Safe Shelters', 'geometry_type': 'Point', 'default_visible': true, 'is_official': true, 'source': 'OSM + field'},
+      {'layer_id': 'habitations', 'name': 'Vulnerable Habitations', 'geometry_type': 'Point', 'default_visible': true, 'is_official': true, 'source': 'OSM + census'},
+      {'layer_id': 'sos', 'name': 'Active SOS', 'geometry_type': 'Point', 'default_visible': true, 'is_official': false, 'source': 'DisasterNet SOS'},
+      {'layer_id': 'crowd_reports', 'name': 'Crowd-sourced Reports', 'geometry_type': 'Point', 'default_visible': true, 'is_official': false, 'source': 'DisasterNet citizens'},
+      {'layer_id': 'usgs_earthquakes', 'name': 'USGS Earthquakes (24h)', 'geometry_type': 'Point', 'default_visible': false, 'is_official': true, 'source': 'USGS'},
+      {'layer_id': 'nasa_eonet', 'name': 'NASA EONET (wildfires & volcanoes)', 'geometry_type': 'Point', 'default_visible': false, 'is_official': true, 'source': 'NASA EONET'},
+    ];
+  }
+
+  static Future<Map<String, dynamic>> gisRoute({
+    required double originLat,
+    required double originLon,
+    required double destLat,
+    required double destLon,
+    bool avoidRedZones = true,
+    String? token,
+  }) async {
+    final query = <String, String>{
+      'origin_lat': originLat.toStringAsFixed(5),
+      'origin_lon': originLon.toStringAsFixed(5),
+      'destination_lat': destLat.toStringAsFixed(5),
+      'destination_lon': destLon.toStringAsFixed(5),
+      'avoid_red_zones': avoidRedZones.toString(),
+    };
+    try {
+      final response = await http.get(
+        _uri('/api/v1/gis/route', query),
+        headers: _headers(token: token),
+      ).timeout(const Duration(seconds: 45));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    // Bundled fallback: straight-line distance
+    return {
+      'server_time': DateTime.now().toUtc().toIso8601String(),
+      'distance_km': _haversineKm(originLat, originLon, destLat, destLon).toStringAsFixed(2),
+      'duration_estimate_min': (_haversineKm(originLat, originLon, destLat, destLon) / 4.0 * 60).round(),
+      'avoided_red_zones': 0,
+      'waypoints': [
+        [originLat, originLon],
+        [destLat, destLon],
+      ],
+      'notes': 'Bundled fallback — straight great-circle distance.',
+    };
+  }
+
+  static double _haversineKm(double lat1, double lon1, double lat2, double lon2) {
+    const r = 6371.0;
+    final p1 = lat1 * math.pi / 180;
+    final p2 = lat2 * math.pi / 180;
+    final dphi = (lat2 - lat1) * math.pi / 180;
+    final dlam = (lon2 - lon1) * math.pi / 180;
+    final a = math.sin(dphi / 2) * math.sin(dphi / 2) +
+        math.cos(p1) * math.cos(p2) * math.sin(dlam / 2) * math.sin(dlam / 2);
+    return 2 * r * math.asin(math.sqrt(a));
+  }
+
+  static Future<Map<String, dynamic>> reverseGeocode({
+    required double latitude,
+    required double longitude,
+    String? token,
+  }) async {
+    final query = <String, String>{
+      'latitude': latitude.toStringAsFixed(5),
+      'longitude': longitude.toStringAsFixed(5),
+    };
+    try {
+      final response = await http.get(
+        _uri('/api/v1/gis/reverse-geocode', query),
+        headers: _headers(token: token),
+      ).timeout(const Duration(seconds: 30));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return {
+      'server_time': DateTime.now().toUtc().toIso8601String(),
+      'latitude': latitude,
+      'longitude': longitude,
+      'source': 'backend-unreachable',
     };
   }
 }

@@ -1,6 +1,6 @@
-import 'package:flutter/material.dart';
-import 'package:field_app/main_screen.dart';
 import 'package:field_app/core/database.dart';
+import 'package:field_app/role_aware_shell.dart';
+import 'package:flutter/material.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,7 +47,7 @@ class DisasterNetApp extends StatelessWidget {
         ),
       ),
       debugShowCheckedModeBanner: false,
-      home: const MainScreen(),
+      home: const RoleAwareShell(),
     );
   }
 }

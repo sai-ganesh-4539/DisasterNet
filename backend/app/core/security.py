@@ -36,8 +36,13 @@ ROLE_PERMISSIONS = {
     "STATE_ANALYST": ["READ", "ANALYZE", "EXPORT", "SYNC"],
     "DISTRICT_MAGISTRATE": ["READ", "ANALYZE", "EXPORT", "SYNC", "APPROVE"],
     "DISTRICT_OPERATIONS_OFFICER": ["READ", "ANALYZE", "SYNC", "WRITE_FIELD_DATA"],
+    # Renamed / unified field role
+    "FIELD_OFFICER": ["READ", "WRITE_FIELD_DATA", "SYNC", "ANALYZE", "RELAY_SOS"],
+    # Back-compat alias
+    "FIELD_SURVEYOR": ["READ", "WRITE_FIELD_DATA", "SYNC", "ANALYZE", "RELAY_SOS"],
     "ANALYST": ["READ", "ANALYZE", "EXPORT"],
-    "FIELD_SURVEYOR": ["READ", "WRITE_FIELD_DATA", "SYNC"],
+    # Public citizen role — can submit SOS, view public layers, post crowd reports
+    "CITIZEN": ["READ_PUBLIC", "SOS_SEND", "CROWD_REPORT", "ALERT_RECEIVE", "RELAY_SOS"],
     "VIEWER": ["READ"],
 }
 
@@ -180,7 +185,14 @@ def check_permission(permission: str):
 
         user_permissions = get_role_permissions(user_role)
 
-        if permission not in user_permissions:
+        # READ implies READ_PUBLIC for citizen-facing endpoints
+        effective = set(user_permissions)
+        if "READ" in effective:
+            effective.add("READ_PUBLIC")
+        if "READ_PUBLIC" in effective and permission == "READ":
+            return current_user
+
+        if permission not in effective:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"User role '{user_role}' does not have permission '{permission}'",

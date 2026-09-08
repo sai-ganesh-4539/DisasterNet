@@ -33,6 +33,12 @@ class AuthService extends ChangeNotifier {
         permissions.contains('APPROVE');
   }
 
+  bool get isCitizen => role.toUpperCase() == 'CITIZEN';
+  bool get isFieldOfficer =>
+      role.toUpperCase() == 'FIELD_OFFICER' ||
+      role.toUpperCase() == 'FIELD_SURVEYOR' ||
+      role.toUpperCase() == 'DISTRICT_OPERATIONS_OFFICER';
+
   Future<void> initialize() async {
     if (_initialized) return;
     await _db.initialize();
@@ -60,6 +66,21 @@ class AuthService extends ChangeNotifier {
     } catch (e) {
       error = e.toString();
       rethrow;
+    } finally {
+      loading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Used by the citizen OTP flow — we already have a token, just persist it.
+  Future<void> loginWithCitizenToken({required String token, required Map<String, dynamic> user}) async {
+    loading = true;
+    error = null;
+    notifyListeners();
+    try {
+      _accessToken = token;
+      _user = Map<String, dynamic>.from(user);
+      await _db.saveAuthSession(token: token, user: _user!);
     } finally {
       loading = false;
       notifyListeners();
