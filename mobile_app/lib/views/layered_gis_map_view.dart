@@ -11,15 +11,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
-/// Layered GIS map view — lets citizens and operators toggle multiple
-/// official data layers (red zones, shelters, habitations, SOS,
-/// crowd reports, USGS earthquakes, NASA EONET, etc.) on the same base
-/// map. Supports tap-to-inspect (with reverse geocoding), draw-polygon
-/// spatial analysis, and routing to a selected shelter.
-///
-/// The base snapshot data (red_zones, shelters, habitations) comes from
-/// LiveGisStore (unchanged). The extra layers (USGS, EONET, SOS,
-/// crowd reports) are fetched lazily from /api/v1/gis/layer/{id}.
 class LayeredGisMapView extends StatefulWidget {
   const LayeredGisMapView({super.key});
 
@@ -35,35 +26,34 @@ class _LayeredGisMapViewState extends State<LayeredGisMapView> {
   static const LatLng _indiaCenter = LatLng(21.7679, 78.8718);
   static const double _initialZoom = 4.6;
 
-  // Layer visibility state — keyed by layer_id
   final Map<String, bool> _layerVisible = {
     'red_zones': true,
     'shelters': true,
     'habitations': true,
     'sos': true,
     'crowd_reports': true,
-    'usgs_earthquakes': false,
-    'nasa_eonet': false,
+    'usgs_earthquakes': true,
+    'nasa_eonet': true,
+    'gdacs': true,
+    'emsc': true,
   };
 
   bool _showLayersPanel = false;
   bool _showSpatialSheet = false;
   bool _showRouteSheet = false;
   bool _loadingExtra = false;
+  bool _hideDemoData = false;
 
   List<Map<String, dynamic>> _sosItems = [];
   List<Map<String, dynamic>> _crowdItems = [];
 
-  // For routing
   LatLng? _routeOrigin;
   LatLng? _routeDestination;
   Map<String, dynamic>? _routeResult;
 
-  // For spatial analysis (tap-aware)
   final List<LatLng> _drawnPolygon = [];
   Map<String, dynamic>? _spatialResult;
 
-  // For inspect
   LatLng? _tappedLocation;
   Map<String, dynamic>? _inspection;
   bool _showInspectorSheet = false;
@@ -99,11 +89,13 @@ class _LayeredGisMapViewState extends State<LayeredGisMapView> {
   }
 
   Future<void> _refreshExtraLayers() async {
+    if (!mounted) return;
     if (_loadingExtra) return;
-    setState(() => _loadingExtra = true);
+    if (mounted) setState(() => _loadingExtra = true);
     try {
       final sosItems = await LiveGisApi.sosList(limit: 100);
-      final crowdItems = await LiveGisApi.crowdReports(limit: 100);
+      final crowdItems = await LiveGisApi.crowdReports();
+      if (!mounted) return;
       setState(() {
         _sosItems = sosItems;
         _crowdItems = crowdItems;
@@ -142,7 +134,6 @@ class _LayeredGisMapViewState extends State<LayeredGisMapView> {
         };
       });
 
-      // Reverse geocode for friendly context
       final rg = await LiveGisApi.reverseGeocode(latitude: point.latitude, longitude: point.longitude);
       if (mounted && rg['display_name'] != null) {
         setState(() {
@@ -231,7 +222,7 @@ class _LayeredGisMapViewState extends State<LayeredGisMapView> {
       final lat = (u['latitude'] as num?)?.toDouble() ?? 0.0;
       final lon = (u['longitude'] as num?)?.toDouble() ?? 0.0;
       final mag = (u['magnitude'] as num?)?.toDouble() ?? 0.0;
-      final size = 16 + (mag * 3).clamp(0, 24);
+      final size = (16 + (mag * 3).clamp(0.0, 24.0)).toDouble();
       return Marker(
         point: LatLng(lat, lon),
         width: size,
@@ -275,9 +266,82 @@ class _LayeredGisMapViewState extends State<LayeredGisMapView> {
       );
     }).toList();
   }
+  List<Marker> _buildGdacsMarkers() {
+    if (!_layerVisible['gdacs']!) return [];
+    return _alerts.alerts
+        .where((a) => a['source']?.toString().toUpperCase() == 'GDACS')
+        .where((a) => a['latitude'] != null && a['longitude'] != null)
+        .map((u) {
+      final lat = (u['latitude'] as num?)?.toDouble() ?? 0.0;
+      final lon = (u['longitude'] as num?)?.toDouble() ?? 0.0;
+      final alertLevel = (u['alert_level']?.toString() ?? 'GREEN').toUpperCase();
+      final eventType = (u['type']?.toString() ?? 'DISASTER').toUpperCase();
+      final color = alertLevel == 'RED'
+          ? const Color(0xFFDC2626)
+          : alertLevel == 'ORANGE'
+              ? const Color(0xFFEA580C)
+              : alertLevel == 'YELLOW'
+                  ? const Color(0xFFCA8A04)
+                  : const Color(0xFF2563EB);
+      final icon = eventType == 'EQ'
+          ? Icons.public_rounded
+          : eventType == 'TC'
+              ? Icons.cyclone_rounded
+              : eventType == 'FL'
+                  ? Icons.water_rounded
+                  : eventType == 'WF'
+                      ? Icons.local_fire_department_rounded
+                      : Icons.warning_amber_rounded;
+      return Marker(
+        point: LatLng(lat, lon),
+        width: 34,
+        height: 34,
+        child: Container(
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.85),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white, width: 2),
+          ),
+          child: Icon(icon, color: Colors.white, size: 16),
+        ),
+      );
+    }).toList();
+  }
+
+  List<Marker> _buildEmscMarkers() {
+    if (!_layerVisible['emsc']!) return [];
+    return _alerts.alerts
+        .where((a) => a['source']?.toString().toUpperCase() == 'EMSC')
+        .map((u) {
+      final lat = (u['latitude'] as num?)?.toDouble() ?? 0.0;
+      final lon = (u['longitude'] as num?)?.toDouble() ?? 0.0;
+      final mag = (u['magnitude'] as num?)?.toDouble() ?? 0.0;
+      final size = (16 + (mag * 3).clamp(0.0, 24.0)).toDouble();
+      final inIndia = u['in_india'] == true;
+      return Marker(
+        point: LatLng(lat, lon),
+        width: size,
+        height: size,
+        child: Container(
+          decoration: BoxDecoration(
+            color: (inIndia ? const Color(0xFFB91C1C) : const Color(0xFF7C2D12)).withValues(alpha: 0.85),
+            shape: BoxShape.circle,
+            border: Border.all(color: inIndia ? const Color(0xFF10B981) : Colors.white, width: inIndia ? 3 : 2),
+          ),
+          child: Center(
+            child: Text(
+              mag.toStringAsFixed(1),
+              style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800),
+            ),
+          ),
+        ),
+      );
+    }).toList();
+  }
 
   List<Polygon> _zonePolygons() {
     if (!_layerVisible['red_zones']!) return [];
+    if (_hideDemoData && _store.isDemoScenarioMode) return [];
     final polygons = <Polygon>[];
     for (final HazardZone zone in _store.zones) {
       final rings = parseWktPolygons(zone.geometryWkt);
@@ -314,7 +378,7 @@ class _LayeredGisMapViewState extends State<LayeredGisMapView> {
         points: points,
         color: const Color(0xFF000000),
         strokeWidth: 4.0,
-        pattern: const StrokePattern.dashed(),
+        pattern: StrokePattern.dashed(segments: const [8.0, 6.0]),
       ),
     ];
   }
@@ -337,14 +401,14 @@ class _LayeredGisMapViewState extends State<LayeredGisMapView> {
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                urlTemplate: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.disastermgmt.field_app',
               ),
               PolygonLayer(polygons: _zonePolygons()),
               PolylineLayer(polylines: _routePolylines()),
               MarkerLayer(
                 markers: [
-                  ...(_layerVisible['shelters']!
+                  ...(_layerVisible['shelters']! && !(_hideDemoData && _store.isDemoScenarioMode)
                       ? _store.shelters.map((s) => Marker(
                             point: LatLng(s.latitude, s.longitude),
                             width: 36,
@@ -362,7 +426,7 @@ class _LayeredGisMapViewState extends State<LayeredGisMapView> {
                             ),
                           ))
                       : <Marker>[]),
-                  ...(_layerVisible['habitations']!
+                  ...(_layerVisible['habitations']! && !(_hideDemoData && _store.isDemoScenarioMode)
                       ? _store.habitations.map((h) => Marker(
                             point: LatLng(h.latitude, h.longitude),
                             width: 36,
@@ -390,6 +454,8 @@ class _LayeredGisMapViewState extends State<LayeredGisMapView> {
                   ..._buildCrowdMarkers(),
                   ..._buildUsgsMarkers(),
                   ..._buildEonetMarkers(),
+                  ..._buildGdacsMarkers(),
+                  ..._buildEmscMarkers(),
                   if (_routeOrigin != null)
                     Marker(
                       point: _routeOrigin!,
@@ -437,7 +503,6 @@ class _LayeredGisMapViewState extends State<LayeredGisMapView> {
             ],
           ),
 
-          // Top toolbar
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -454,7 +519,9 @@ class _LayeredGisMapViewState extends State<LayeredGisMapView> {
                         ],
                       ),
                       child: Text(
-                        _store.alert['headline']?.toString() ?? 'Tap to inspect • Long-press shelter to route',
+                        _alerts.hasAlerts
+                            ? 'LIVE: ${_alerts.alerts.length} alerts from ${_alerts.sourcesAttempted.length} sources • Tap to inspect'
+                            : _store.alert['headline']?.toString() ?? 'Tap to inspect • Tap layers icon to toggle',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
@@ -473,13 +540,122 @@ class _LayeredGisMapViewState extends State<LayeredGisMapView> {
             ),
           ),
 
-          // Inspector sheet
           if (_showInspectorSheet) _buildInspectorSheet(),
+          if (_showLayersPanel) _buildLayersPanel(),
         ],
       ),
     );
   }
 
+  Widget _buildLayersPanel() {
+    final layerDefs = <(String, String, IconData, Color)>[
+      ('red_zones', 'Red Zones (AI hazard polygons)', Icons.layers_rounded, const Color(0xFFDC2626)),
+      ('shelters', 'Safe Shelters', Icons.night_shelter_rounded, const Color(0xFF059669)),
+      ('habitations', 'Habitations', Icons.home_rounded, const Color(0xFFD97706)),
+      ('sos', 'Active SOS', Icons.sos_rounded, const Color(0xFFDC2626)),
+      ('crowd_reports', 'Crowd Reports', Icons.report_problem_rounded, const Color(0xFFCA8A04)),
+      ('usgs_earthquakes', 'USGS Earthquakes', Icons.public_rounded, const Color(0xFFDC2626)),
+      ('emsc', 'EMSC Earthquakes', Icons.public_rounded, const Color(0xFFB91C1C)),
+      ('nasa_eonet', 'NASA EONET (Fires/Volcanoes)', Icons.local_fire_department_rounded, const Color(0xFF7C3AED)),
+      ('gdacs', 'GDACS (UN/EU Alerts)', Icons.cyclone_rounded, const Color(0xFF2563EB)),
+    ];
+    return Align(
+      alignment: Alignment.topRight,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 60, 12, 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: const [
+            BoxShadow(color: Color(0x24000000), blurRadius: 20, offset: Offset(0, 4)),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.layers_rounded, size: 18, color: Color(0xFF000000)),
+                const SizedBox(width: 8),
+                const Text('Map Layers', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, size: 18, color: Color(0xFF6B7280)),
+                  onPressed: () => setState(() => _showLayersPanel = false),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(color: const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(6)),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF059669)),
+                  ),
+                  const SizedBox(width: 4),
+                  Text('${_alerts.alerts.length} live alerts from ${_alerts.sourcesAttempted.length} sources',
+                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Color(0xFF059669))),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            ...layerDefs.map((def) {
+              final id = def.$1;
+              final name = def.$2;
+              final icon = def.$3;
+              final color = def.$4;
+              return CheckboxListTile(
+                value: _layerVisible[id] ?? false,
+                onChanged: (v) => setState(() => _layerVisible[id] = v ?? false),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.trailing,
+                title: Row(
+                  children: [
+                    Icon(icon, size: 16, color: color),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(name, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+                  ],
+                ),
+              );
+            }),
+            const Divider(height: 16),
+            SwitchListTile(
+              value: _hideDemoData,
+              onChanged: (v) => setState(() => _hideDemoData = v),
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: const Row(
+                children: [
+                  Icon(Icons.visibility_off_rounded, size: 16, color: Color(0xFF6B7280)),
+                  SizedBox(width: 8),
+                  Expanded(child: Text('Hide demo data (show only LIVE)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(color: const Color(0xFFF9FAFB), borderRadius: BorderRadius.circular(8)),
+              child: const Text(
+                'USGS + EMSC + GDACS + NASA EONET markers are 100% LIVE data. '
+                'Red Zones + Shelters + Habitations come from the backend GIS snapshot '
+                '(falls back to Odisha demo when the backend Overpass API is slow).',
+                style: TextStyle(fontSize: 10, color: Color(0xFF6B7280), height: 1.3),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
   Widget _iconButton(IconData icon, VoidCallback onTap, {bool loading = false}) {
     return GestureDetector(
       onTap: onTap,
@@ -536,11 +712,9 @@ class _LayeredGisMapViewState extends State<LayeredGisMapView> {
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // Inspector sheet (bottom)
-  // ---------------------------------------------------------------------------
   Widget _buildInspectorSheet() {
     final inspection = _inspection ?? const <String, dynamic>{};
+    final riskScore = (inspection['risk_score'] as num?)?.toDouble() ?? 0.0;
     return Align(
       alignment: Alignment.bottomCenter,
       child: Container(
@@ -626,13 +800,9 @@ class _LayeredGisMapViewState extends State<LayeredGisMapView> {
                     Row(
                       children: [
                         Icon(
-                          ((inspection['risk_score'] as num?) ?? 0).toDouble() >= 55
-                              ? Icons.warning_rounded
-                              : Icons.verified_rounded,
+                          riskScore >= 55 ? Icons.warning_rounded : Icons.verified_rounded,
                           size: 22,
-                          color: ((inspection['risk_score'] as num?) ?? 0).toDouble() >= 55
-                              ? const Color(0xFFDC2626)
-                              : const Color(0xFF059669),
+                          color: riskScore >= 55 ? const Color(0xFFDC2626) : const Color(0xFF059669),
                         ),
                         const SizedBox(width: 8),
                         Expanded(

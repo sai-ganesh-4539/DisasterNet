@@ -581,6 +581,7 @@ class LiveGisApi {
     double radiusKm = 25.0,
     String? category,
     String? severity,
+    int limit = 100,
     String? token,
   }) async {
     final query = <String, String>{

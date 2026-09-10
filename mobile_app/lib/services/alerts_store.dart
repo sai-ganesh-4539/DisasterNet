@@ -4,7 +4,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:field_app/services/live_gis_api.dart';
 import 'package:flutter/foundation.dart';
 
-/// Live alerts feed (NDMA, IMD, USGS, OpenWeather, NASA EONET).
+/// Live alerts feed (USGS, EMSC, NASA EONET, ReliefWeb, GDACS, NDMA, IMD, OpenWeather).
 /// Used by the citizen-facing alerts ticker on the home screen.
 class AlertsStore extends ChangeNotifier {
   AlertsStore._();
@@ -48,10 +48,7 @@ class AlertsStore extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      final payload = await LiveGisApi.liveAlerts(
-        latitude: latitude,
-        longitude: longitude,
-      );
+      final payload = await LiveGisApi.liveAlerts(latitude: latitude, longitude: longitude);
       alerts = (payload['items'] as List? ?? [])
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
@@ -74,12 +71,10 @@ class AlertsStore extends ChangeNotifier {
     }
   }
 
-  /// Pull alerts by source — useful for the ticker's filter chips.
   List<Map<String, dynamic>> bySource(String source) {
     return alerts.where((a) => a['source']?.toString().toUpperCase() == source.toUpperCase()).toList();
   }
 
-  /// Top alerts (severity-aware ordering — CRITICAL > HIGH > MEDIUM > LOW)
   List<Map<String, dynamic>> get topAlerts {
     final severityRank = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3};
     final copy = List<Map<String, dynamic>>.from(alerts);

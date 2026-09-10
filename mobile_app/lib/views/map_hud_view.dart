@@ -266,7 +266,8 @@ class _MapHUDViewState extends State<MapHUDView> {
                   ),
                   children: [
                     TileLayer(
-                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      urlTemplate: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+		      subdomains: const ['a', 'b', 'c', 'd'],
                       userAgentPackageName: 'com.disastermgmt.field_app',
                     ),
                     PolygonLayer(polygons: _zonePolygons()),

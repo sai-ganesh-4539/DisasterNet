@@ -333,7 +333,7 @@ async def list_sos(
     category: Optional[str] = Query(default=None),
     severity: Optional[str] = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
 ):
     """List SOSes — optionally filtered by location/radius and metadata.
 
@@ -341,8 +341,8 @@ async def list_sos(
     awareness). Field officers and admins see all SOSes by default.
     """
     items: List[SosRecord] = []
-    role = current_user.get("role") or ""
-    is_citizen = role.upper() == "CITIZEN"
+    role = (current_user or {}).get("role") or ""
+    is_citizen = role.upper() == "CITIZEN" or current_user is None
 
     with _LOCK:
         for record in _SOS_STORE.values():

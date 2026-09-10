@@ -54,6 +54,7 @@ class _CitizenHomeViewState extends State<CitizenHomeView> {
       key: _scaffoldKey,
       backgroundColor: const Color(0xFFFFFFFF),
       appBar: _buildAppBar(),
+      drawer: _buildDrawer(),
       body: _getCurrentScreen(),
       bottomNavigationBar: _buildBottomNav(),
     );
